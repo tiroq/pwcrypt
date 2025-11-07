@@ -31,11 +31,11 @@ openssl_enc_args=(
 )
 
 openssl_dec_args=(
-  dec -aes-256-cbc          # can be replaced with -aes-256-gcm if your OpenSSL supports it
-  -salt                     # adds random salt
-  -pbkdf2                   # modern key derivation
-  -iter 200000              # PBKDF2 strengthening (~200k iterations)
-  -md sha256                # hash function for PBKDF2
+  enc -d -aes-256-cbc          # can be replaced with -aes-256-gcm if your OpenSSL supports it
+  -pbkdf2
+  -iter 200000
+  -md sha256
+  -a
 )
 
 cmd="${1:-}"
@@ -76,6 +76,7 @@ case "$cmd" in
   enc)
     if [[ "$in" == "/dev/stdin" && -t 0 ]]; then
       # No input file and stdin is terminal: ask for secret interactively
+      echo "Prompting for secret to encrypt..."
       read -r -s -p "Secret to encrypt: " SECRET < /dev/tty
       echo >&2
       printf '%s' "$SECRET" | \
@@ -91,8 +92,8 @@ case "$cmd" in
     if [[ "$in" == "/dev/stdin" && -t 0 ]]; then
       read -r -s -p "Secret to decrypt: " SECRET < /dev/tty
       echo >&2
-      printf '%s' "$SECRET" | \
-        openssl "${openssl_dec_args[@]}" -d -pass env:MASTER > "$out"
+      echo "$SECRET" | \
+        openssl "${openssl_dec_args[@]}" -d -pass env:MASTER > "$out" ; echo
       unset SECRET
       exit 0
     else
