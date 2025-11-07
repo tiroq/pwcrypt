@@ -7,27 +7,27 @@ Usage:
   pwcrypt enc [-i FILE] [-o FILE]
   pwcrypt dec [-i FILE] [-o FILE]
 
-  Без -i читает из stdin (для enc при tty запросит секрет интерактивно).
-  Без -o пишет в stdout.
+  Without -i reads from stdin (for enc with tty will prompt for secret interactively).
+  Without -o writes to stdout.
 
-Опции:
-  -i FILE   входной файл (по умолчанию stdin)
-  -o FILE   выходной файл (по умолчанию stdout)
+Options:
+  -i FILE   input file (default stdin)
+  -o FILE   output file (default stdout)
 
-Примечания:
-  • Используется AES-256-CBC + PBKDF2 с 200k итераций, соль, Base64.
-  • Мастер-пароль запрашивается через /dev/tty и не попадает в историю shell.
-  • Храните выходные данные целиком (начинается с "U2FsdGVkX1..." из-за Base64).
+Notes:
+  • Uses AES-256-CBC + PBKDF2 with 200k iterations, salt, Base64.
+  • Master password is requested via /dev/tty and doesn't appear in shell history.
+  • Store output data entirely (starts with "U2FsdGVkX1..." due to Base64).
 USAGE
 }
 
 openssl_enc_args=(
-  enc -aes-256-cbc          # можно заменить на -aes-256-gcm при поддержке вашей OpenSSL
-  -salt                     # добавляет случайную соль
-  -pbkdf2                   # современная деривация ключа
-  -iter 200000              # усиление PBKDF2 (~200k итераций)
-  -md sha256                # хэш-функция для PBKDF2
-  -a                        # Base64 (удобно хранить/копировать)
+  enc -aes-256-cbc          # can be replaced with -aes-256-gcm if your OpenSSL supports it
+  -salt                     # adds random salt
+  -pbkdf2                   # modern key derivation
+  -iter 200000              # PBKDF2 strengthening (~200k iterations)
+  -md sha256                # hash function for PBKDF2
+  -a                        # Base64 (convenient for storage/copying)
 )
 
 cmd="${1:-}"
@@ -37,7 +37,7 @@ shift || true
 in="/dev/stdin"
 out="/dev/stdout"
 
-# Парсинг -i/-o
+# Parsing -i/-o
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -i) shift; in="${1:-}"; [[ -z "$in" ]] && { echo "Missing -i value" >&2; exit 2; } ;;
@@ -48,12 +48,12 @@ while [[ $# -gt 0 ]]; do
   shift || true
 done
 
-# Запрос мастер-пароля через /dev/tty
+# Request master password via /dev/tty
 if [[ -t 2 ]]; then
   read -r -s -p "Master passphrase: " MASTER < /dev/tty
   echo >&2
 else
-  # если нет tty (пайп), всё равно читаем из tty, если доступен
+  # if no tty (pipe), still try to read from tty if available
   if [[ -r /dev/tty ]]; then
     read -r -s -p "Master passphrase: " MASTER < /dev/tty
     echo >&2
@@ -67,14 +67,14 @@ export MASTER
 case "$cmd" in
   enc)
     if [[ "$in" == "/dev/stdin" && -t 0 ]]; then
-      # Нет входного файла и stdin — это терминал: спросим секрет интерактивно
+      # No input file and stdin is terminal: ask for secret interactively
       read -r -s -p "Secret to encrypt: " SECRET < /dev/tty
       echo >&2
       printf '%s' "$SECRET" | \
         openssl "${openssl_enc_args[@]}" -pass env:MASTER > "$out"
       unset SECRET
     else
-      # Берём из файла или из конвейера stdin
+      # Take from file or from stdin pipeline
       openssl "${openssl_enc_args[@]}" -pass env:MASTER -in "$in" -out "$out"
     fi
     ;;
@@ -90,5 +90,5 @@ case "$cmd" in
     ;;
 esac
 
-# Очистить переменную мастер-пароля
+# Clear master password variable
 unset MASTER
