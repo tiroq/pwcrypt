@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage:
+  pwcrypt enc [-i FILE] [-o FILE]
+  pwcrypt dec [-i FILE] [-o FILE]
+
+  Без -i читает из stdin (для enc при tty запросит секрет интерактивно).
+  Без -o пишет в stdout.
+
+Опции:
+  -i FILE   входной файл (по умолчанию stdin)
+  -o FILE   выходной файл (по умолчанию stdout)
+
+Примечания:
+  • Используется AES-256-CBC + PBKDF2 с 200k итераций, соль, Base64.
+  • Мастер-пароль запрашивается через /dev/tty и не попадает в историю shell.
+  • Храните выходные данные целиком (начинается с "U2FsdGVkX1..." из-за Base64).
+USAGE
+}
+
+openssl_enc_args=(
+  enc -aes-256-cbc          # можно заменить на -aes-256-gcm при поддержке вашей OpenSSL
+  -salt                     # добавляет случайную соль
+  -pbkdf2                   # современная деривация ключа
+  -iter 200000              # усиление PBKDF2 (~200k итераций)
+  -md sha256                # хэш-функция для PBKDF2
+  -a                        # Base64 (удобно хранить/копировать)
+)
+
+cmd="${1:-}"
+[[ -z "$cmd" ]] && { usage; exit 1; }
+shift || true
+
+in="/dev/stdin"
+out="/dev/stdout"
+
+# Парсинг -i/-o
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -i) shift; in="${1:-}"; [[ -z "$in" ]] && { echo "Missing -i value" >&2; exit 2; } ;;
+    -o) shift; out="${1:-}"; [[ -z "$out" ]] && { echo "Missing -o value" >&2; exit 2; } ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown arg: $1" >&2; usage; exit 2 ;;
+  esac
+  shift || true
+done
+
+# Запрос мастер-пароля через /dev/tty
+if [[ -t 2 ]]; then
+  read -r -s -p "Master passphrase: " MASTER < /dev/tty
+  echo >&2
+else
+  # если нет tty (пайп), всё равно читаем из tty, если доступен
+  if [[ -r /dev/tty ]]; then
+    read -r -s -p "Master passphrase: " MASTER < /dev/tty
+    echo >&2
+  else
+    echo "Cannot read master passphrase (no TTY). Run interactively." >&2
+    exit 1
+  fi
+fi
+export MASTER
+
+case "$cmd" in
+  enc)
+    if [[ "$in" == "/dev/stdin" && -t 0 ]]; then
+      # Нет входного файла и stdin — это терминал: спросим секрет интерактивно
+      read -r -s -p "Secret to encrypt: " SECRET < /dev/tty
+      echo >&2
+      printf '%s' "$SECRET" | \
+        openssl "${openssl_enc_args[@]}" -pass env:MASTER > "$out"
+      unset SECRET
+    else
+      # Берём из файла или из конвейера stdin
+      openssl "${openssl_enc_args[@]}" -pass env:MASTER -in "$in" -out "$out"
+    fi
+    ;;
+
+  dec)
+    openssl "${openssl_enc_args[@]}" -d -pass env:MASTER -in "$in" -out "$out"
+    ;;
+
+  *)
+    echo "Unknown command: $cmd" >&2
+    usage
+    exit 2
+    ;;
+esac
+
+# Очистить переменную мастер-пароля
+unset MASTER
